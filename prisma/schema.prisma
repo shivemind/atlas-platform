@@ -1,0 +1,686 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Core Enums ───────────────────────────────────────────────────────
+
+enum MerchantStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ApiKeyType {
+  SECRET
+  PUBLISHABLE
+}
+
+enum ApiKeyRole {
+  MERCHANT
+  PLATFORM_ADMIN
+}
+
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum LedgerEntryStatus {
+  DRAFT
+  POSTED
+}
+
+enum LedgerLineDirection {
+  DEBIT
+  CREDIT
+}
+
+enum WebhookDeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+enum IdempotencyState {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+// ── Orgs / Teams / RBAC Enums ────────────────────────────────────────
+
+enum OrgStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum OrgMemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum TeamRole {
+  LEAD
+  MEMBER
+  VIEWER
+}
+
+// ── Onboarding / Underwriting Enums ──────────────────────────────────
+
+enum OnboardingStatus {
+  STARTED
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  DENIED
+  WITHDRAWN
+}
+
+enum DocumentType {
+  GOVERNMENT_ID
+  PROOF_OF_ADDRESS
+  BANK_STATEMENT
+  TAX_RETURN
+  ARTICLES_OF_INCORPORATION
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum UnderwritingDecisionResult {
+  APPROVED
+  DENIED
+  ESCALATED
+  PENDING_INFO
+}
+
+// ── Reports / Exports Enums ──────────────────────────────────────────
+
+enum ReportStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ExportFormat {
+  CSV
+  JSON
+  PDF
+}
+
+enum ExportScheduleFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+// ── Platform Ops Enums ───────────────────────────────────────────────
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum DeadLetterStatus {
+  PENDING
+  REPROCESSED
+  DISCARDED
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Core Models (dependencies for platform domain)
+// ═══════════════════════════════════════════════════════════════════════
+
+model Merchant {
+  id                 String               @id @default(cuid())
+  name               String
+  status             MerchantStatus       @default(ACTIVE)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  apiKeys            ApiKey[]
+  customers          Customer[]
+  ledgerAccounts     LedgerAccount[]
+  ledgerEntries      LedgerJournalEntry[]
+  ledgerLines        LedgerLine[]
+  webhookEndpoints   WebhookEndpoint[]
+  webhookDeliveries  WebhookDelivery[]
+  webhookAttempts    WebhookAttempt[]
+  idempotencyRecords IdempotencyRecord[]
+  events             Event[]
+  auditLogs          AuditLog[]
+  orgId              String?
+  org                Org?                 @relation(fields: [orgId], references: [id])
+  onboardingProfile  OnboardingProfile?
+  reports            Report[]
+  exports            Export[]
+  exportSchedules    ExportSchedule[]
+
+  @@index([orgId])
+  @@map("merchants")
+}
+
+model ApiKey {
+  id         String     @id @default(cuid())
+  merchantId String
+  name       String
+  keyType    ApiKeyType @default(SECRET)
+  role       ApiKeyRole @default(MERCHANT)
+  scopes     Json
+  keyPrefix  String
+  keyHash    String
+  isActive   Boolean    @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  merchant   Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, keyHash])
+  @@index([merchantId, createdAt])
+  @@map("api_keys")
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  merchantId String
+  externalId String?
+  email      String?
+  name       String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, externalId])
+  @@index([merchantId, createdAt])
+  @@map("customers")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Orgs / Teams / RBAC
+// ═══════════════════════════════════════════════════════════════════════
+
+model Org {
+  id        String    @id @default(cuid())
+  name      String
+  slug      String    @unique
+  status    OrgStatus @default(ACTIVE)
+  metadata  Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  merchants Merchant[]
+  members   OrgMember[]
+  teams     Team[]
+  roles     Role[]
+
+  @@index([status])
+  @@map("orgs")
+}
+
+model OrgMember {
+  id         String        @id @default(cuid())
+  orgId      String
+  merchantId String
+  role       OrgMemberRole @default(MEMBER)
+  invitedBy  String?
+  invitedAt  DateTime      @default(now())
+  acceptedAt DateTime?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  org        Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  teamMembers TeamMember[]
+
+  @@unique([orgId, merchantId])
+  @@index([orgId, createdAt])
+  @@map("org_members")
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  slug        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  members TeamMember[]
+
+  @@unique([orgId, slug])
+  @@index([orgId, createdAt])
+  @@map("teams")
+}
+
+model TeamMember {
+  id          String   @id @default(cuid())
+  teamId      String
+  orgMemberId String
+  role        TeamRole @default(MEMBER)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  orgMember   OrgMember @relation(fields: [orgMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, orgMemberId])
+  @@index([teamId, createdAt])
+  @@map("team_members")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  permissions Json
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  org         Org      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, name])
+  @@index([orgId, createdAt])
+  @@map("roles")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Onboarding / KYB / Underwriting
+// ═══════════════════════════════════════════════════════════════════════
+
+model OnboardingProfile {
+  id              String           @id @default(cuid())
+  merchantId      String           @unique
+  businessName    String?
+  businessType    String?
+  taxId           String?
+  website         String?
+  country         String?
+  status          OnboardingStatus @default(STARTED)
+  submittedAt     DateTime?
+  metadata        Json?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  owners            Owner[]
+  documents         Document[]
+  bankAccounts      BankAccount[]
+  underwritingCases UnderwritingCase[]
+
+  @@index([status])
+  @@map("onboarding_profiles")
+}
+
+model Owner {
+  id                   String            @id @default(cuid())
+  onboardingProfileId  String
+  firstName            String
+  lastName             String
+  email                String?
+  ownershipPercentage  Int?
+  title                String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  onboardingProfile    OnboardingProfile @relation(fields: [onboardingProfileId], references: [id], onDelete: Cascade)
+
+  @@index([onboardingProfileId])
+  @@map("owners")
+}
+
+model Document {
+  id                   String            @id @default(cuid())
+  onboardingProfileId  String
+  type                 DocumentType
+  status               DocumentStatus    @default(PENDING)
+  fileName             String
+  fileSize             Int?
+  mimeType             String?
+  reviewNote           String?
+  reviewedAt           DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  onboardingProfile    OnboardingProfile @relation(fields: [onboardingProfileId], references: [id], onDelete: Cascade)
+
+  @@index([onboardingProfileId])
+  @@map("documents")
+}
+
+model BankAccount {
+  id                   String            @id @default(cuid())
+  onboardingProfileId  String
+  bankName             String
+  accountHolderName    String
+  routingNumber        String
+  accountNumberLast4   String
+  accountType          String            @default("checking")
+  isVerified           Boolean           @default(false)
+  isPrimary            Boolean           @default(false)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  onboardingProfile    OnboardingProfile @relation(fields: [onboardingProfileId], references: [id], onDelete: Cascade)
+
+  @@index([onboardingProfileId])
+  @@map("bank_accounts")
+}
+
+model UnderwritingCase {
+  id                   String            @id @default(cuid())
+  onboardingProfileId  String
+  assignedTo           String?
+  riskScore            Int?
+  notes                String?
+  status               String            @default("open")
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  onboardingProfile    OnboardingProfile @relation(fields: [onboardingProfileId], references: [id], onDelete: Cascade)
+
+  decisions UnderwritingDecision[]
+
+  @@index([onboardingProfileId])
+  @@map("underwriting_cases")
+}
+
+model UnderwritingDecision {
+  id                 String                     @id @default(cuid())
+  underwritingCaseId String
+  result             UnderwritingDecisionResult
+  reason             String?
+  decidedBy          String?
+  decidedAt          DateTime                   @default(now())
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  underwritingCase   UnderwritingCase           @relation(fields: [underwritingCaseId], references: [id], onDelete: Cascade)
+
+  @@index([underwritingCaseId])
+  @@map("underwriting_decisions")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Reports / Exports
+// ═══════════════════════════════════════════════════════════════════════
+
+model Report {
+  id           String       @id @default(cuid())
+  merchantId   String
+  type         String
+  name         String
+  status       ReportStatus @default(QUEUED)
+  parameters   Json?
+  resultUrl    String?
+  errorMessage String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  merchant     Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+  @@index([merchantId, createdAt])
+  @@map("reports")
+}
+
+model Export {
+  id           String       @id @default(cuid())
+  merchantId   String
+  type         String
+  format       ExportFormat @default(CSV)
+  status       ReportStatus @default(QUEUED)
+  parameters   Json?
+  resultUrl    String?
+  errorMessage String?
+  rowCount     Int?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  merchant     Merchant     @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, status])
+  @@index([merchantId, createdAt])
+  @@map("exports")
+}
+
+model ExportSchedule {
+  id          String                  @id @default(cuid())
+  merchantId  String
+  type        String
+  format      ExportFormat            @default(CSV)
+  frequency   ExportScheduleFrequency @default(DAILY)
+  parameters  Json?
+  isActive    Boolean                 @default(true)
+  lastRunAt   DateTime?
+  nextRunAt   DateTime?
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  merchant    Merchant                @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@map("export_schedules")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Platform Ops
+// ═══════════════════════════════════════════════════════════════════════
+
+model Job {
+  id           String    @id @default(cuid())
+  type         String
+  status       JobStatus @default(QUEUED)
+  payload      Json?
+  result       Json?
+  errorMessage String?
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3)
+  scheduledAt  DateTime  @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([type, status])
+  @@index([scheduledAt])
+  @@map("jobs")
+}
+
+model DeadLetter {
+  id             String           @id @default(cuid())
+  sourceType     String
+  sourceId       String?
+  payload        Json
+  errorMessage   String
+  status         DeadLetterStatus @default(PENDING)
+  reprocessedAt  DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([sourceType, status])
+  @@index([createdAt])
+  @@map("dead_letters")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Infrastructure (Webhooks, Events, Audit, Idempotency, Ledger)
+// ═══════════════════════════════════════════════════════════════════════
+
+model WebhookEndpoint {
+  id         String    @id @default(cuid())
+  merchantId String
+  url        String
+  secret     String
+  isActive   Boolean   @default(true)
+  eventTypes Json
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  merchant   Merchant  @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  deliveries WebhookDelivery[]
+
+  @@index([merchantId, createdAt])
+  @@map("webhook_endpoints")
+}
+
+model WebhookDelivery {
+  id                String                @id @default(cuid())
+  merchantId        String
+  webhookEndpointId String
+  eventType         String
+  payload           Json
+  status            WebhookDeliveryStatus @default(PENDING)
+  deliveredAt       DateTime?
+  nextAttemptAt     DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  merchant          Merchant              @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  webhookEndpoint   WebhookEndpoint       @relation(fields: [webhookEndpointId], references: [id], onDelete: Cascade)
+
+  attempts WebhookAttempt[]
+
+  @@index([merchantId, createdAt])
+  @@map("webhook_deliveries")
+}
+
+model WebhookAttempt {
+  id             String          @id @default(cuid())
+  merchantId     String
+  deliveryId     String
+  attemptNumber  Int
+  requestBody    Json?
+  responseStatus Int?
+  responseBody   String?
+  errorMessage   String?
+  createdAt      DateTime        @default(now())
+  completedAt    DateTime?
+  merchant       Merchant        @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  delivery       WebhookDelivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  @@unique([deliveryId, attemptNumber])
+  @@index([merchantId, createdAt])
+  @@map("webhook_attempts")
+}
+
+model Event {
+  id         String   @id @default(cuid())
+  merchantId String
+  type       String
+  entityType String
+  entityId   String
+  payload    Json
+  actorType  String?
+  actorId    String?
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@index([merchantId, entityType, entityId])
+  @@index([merchantId, type])
+  @@map("events")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  merchantId String
+  action     String
+  actorType  String
+  actorId    String
+  entityType String
+  entityId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  merchant   Merchant @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@index([merchantId, createdAt])
+  @@index([merchantId, entityType, entityId])
+  @@map("audit_logs")
+}
+
+model IdempotencyRecord {
+  id                  String           @id @default(cuid())
+  merchantId          String
+  route               String
+  idempotencyKey      String
+  requestHash         String
+  state               IdempotencyState @default(PENDING)
+  responseStatusCode  Int?
+  responseBody        String?
+  responseContentType String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  expiresAt           DateTime?
+  merchant            Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  @@unique([merchantId, route, idempotencyKey])
+  @@index([merchantId, createdAt])
+  @@map("idempotency_records")
+}
+
+model LedgerAccount {
+  id          String            @id @default(cuid())
+  merchantId  String
+  code        String
+  name        String
+  accountType LedgerAccountType
+  currency    String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  merchant    Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  lines LedgerLine[]
+
+  @@unique([merchantId, code])
+  @@index([merchantId, createdAt])
+  @@map("ledger_accounts")
+}
+
+model LedgerJournalEntry {
+  id          String            @id @default(cuid())
+  merchantId  String
+  reference   String?
+  description String?
+  status      LedgerEntryStatus @default(DRAFT)
+  postedAt    DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  merchant    Merchant          @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+
+  lines LedgerLine[]
+
+  @@index([merchantId, createdAt])
+  @@map("ledger_journal_entries")
+}
+
+model LedgerLine {
+  id             String              @id @default(cuid())
+  merchantId     String
+  journalEntryId String
+  accountId      String
+  direction      LedgerLineDirection
+  amount         Int
+  createdAt      DateTime            @default(now())
+  merchant       Merchant            @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  journalEntry   LedgerJournalEntry  @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  account        LedgerAccount       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([merchantId, createdAt])
+  @@index([journalEntryId])
+  @@index([accountId])
+  @@map("ledger_lines")
+}

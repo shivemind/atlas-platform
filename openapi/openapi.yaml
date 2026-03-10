@@ -1,0 +1,6195 @@
+openapi: 3.1.0
+info:
+  title: Atlas Platform API
+  version: 0.2.0
+  description: Platform operations — orgs, onboarding, webhooks, events, reports, exports, and cron jobs
+  contact:
+    name: AtlasPayments Team
+    url: https://github.com/shivemind/atlaspayments
+servers:
+  - url: http://localhost:3000
+    description: Local development server. Override via Postman {{baseUrl}} environment variable.
+tags:
+  - name: Orgs
+    description: Organization and workspace management
+  - name: Teams
+    description: Team membership and role management
+  - name: Onboarding
+    description: Merchant onboarding and KYB simulator
+  - name: Underwriting
+    description: Underwriting cases and decisions
+  - name: Reports
+    description: On-demand report generation
+  - name: Exports
+    description: Export management and scheduled exports
+  - name: Webhooks
+    description: Webhook endpoint CRUD, deliveries, and replay
+  - name: Events
+    description: Event stream queries with cursor pagination
+  - name: Cron
+    description: Internal cron-triggered processors (Vercel Cron compatible)
+paths:
+  /api/v1/webhook_endpoints:
+    get:
+      summary: List webhook endpoints
+      description: Returns all webhook endpoints for the authenticated merchant.
+      x-platform:
+        kind: resource
+        entity: WebhookEndpoint
+        affectsLedger: false
+      operationId: listWebhookEndpoints
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      responses:
+        "200":
+          description: Webhook endpoints for the merchant.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+              examples:
+                list:
+                  value:
+                    data:
+                      - id: cmf1webhook123
+                        url: https://example.com/webhooks
+                        enabled_events:
+                          - payment_intent.succeeded
+                        created_at: 2026-03-01T09:00:00.000Z
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create webhook endpoint
+      description: |
+        Registers a new webhook endpoint. Generates a HMAC SHA-256 signing secret shown only on creation.
+      x-platform:
+        kind: resource
+        entity: WebhookEndpoint
+        affectsLedger: false
+      operationId: createWebhookEndpoint
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+                - enabled_events
+              properties:
+                url:
+                  type: string
+                  format: uri
+                enabled_events:
+                  type: array
+                  items:
+                    type: string
+            examples:
+              basic:
+                value:
+                  url: https://example.com/webhooks
+                  enabled_events:
+                    - payment_intent.succeeded
+                    - refund.succeeded
+      responses:
+        "201":
+          description: Webhook endpoint created with signing secret.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_endpoint:
+                    type: object
+              examples:
+                created:
+                  value:
+                    webhook_endpoint:
+                      id: cmf1webhook123
+                      url: https://example.com/webhooks
+                      enabled_events:
+                        - payment_intent.succeeded
+                        - refund.succeeded
+                      secret: whsec_abc123def456
+                      created_at: 2026-03-01T09:00:00.000Z
+        "400":
+          description: Invalid payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_endpoints/{id}/rotate_secret:
+    post:
+      summary: Rotate webhook endpoint signing secret
+      description: |
+        Generates a new HMAC signing secret; the previous secret is immediately invalidated.
+      x-platform:
+        kind: transition
+        entity: WebhookEndpoint
+        stateChanges:
+          - secret_rotated
+        affectsLedger: false
+      operationId: rotateWebhookEndpointSecret
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: New signing secret generated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+              examples:
+                rotated:
+                  value:
+                    secret: whsec_newxyz789
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook endpoint not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_endpoints/{id}:
+    get:
+      summary: Retrieve a webhook endpoint
+      description: Returns the webhook endpoint with its secret and configuration.
+      x-platform:
+        kind: resource
+        entity: WebhookEndpoint
+        affectsLedger: false
+      operationId: getWebhookEndpoint
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Webhook endpoint details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_endpoint:
+                    $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook endpoint not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update a webhook endpoint
+      description: |
+        Update the URL, enabled events, or active status of a webhook endpoint.
+      x-platform:
+        kind: transition
+        entity: WebhookEndpoint
+        stateChanges:
+          - updated
+        affectsLedger: false
+      operationId: updateWebhookEndpoint
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  format: uri
+                enabled_events:
+                  type: array
+                  items:
+                    type: string
+                is_active:
+                  type: boolean
+            examples:
+              updateUrl:
+                value:
+                  url: https://example.com/new-webhook
+              deactivate:
+                value:
+                  is_active: false
+      responses:
+        "200":
+          description: Webhook endpoint updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_endpoint:
+                    $ref: "#/components/schemas/WebhookEndpoint"
+        "400":
+          description: Invalid payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook endpoint not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Deactivate a webhook endpoint
+      description: |
+        Soft-deletes a webhook endpoint by setting is_active to false. The endpoint is retained for audit history.
+      x-platform:
+        kind: transition
+        entity: WebhookEndpoint
+        stateChanges:
+          - deactivated
+        affectsLedger: false
+      operationId: deleteWebhookEndpoint
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Webhook endpoint deactivated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_endpoint:
+                    $ref: "#/components/schemas/WebhookEndpoint"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook endpoint not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_endpoints/{id}/test:
+    post:
+      summary: Send a test webhook delivery
+      description: >
+        Creates a test webhook delivery with event type "endpoint.test" and immediately dispatches it to the endpoint
+        URL. Useful for verifying endpoint connectivity and signature validation.
+      x-platform:
+        kind: transition
+        entity: WebhookDelivery
+        stateChanges:
+          - test_sent
+        affectsLedger: false
+      operationId: testWebhookEndpoint
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "201":
+          description: Test delivery created and dispatched.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_delivery:
+                    $ref: "#/components/schemas/WebhookDelivery"
+                  delivered:
+                    type: boolean
+                  response_status:
+                    type: integer
+              examples:
+                delivered:
+                  value:
+                    webhook_delivery:
+                      id: cmf1testdel123
+                      event_type: endpoint.test
+                      status: DELIVERED
+                    delivered: true
+                    response_status: 200
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook endpoint not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_deliveries:
+    get:
+      summary: List webhook deliveries
+      description: |
+        Returns a paginated list of webhook deliveries with optional status, event type, and date range filters.
+      x-platform:
+        kind: resource
+        entity: WebhookDelivery
+        affectsLedger: false
+      operationId: listWebhookDeliveries
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: status
+          description: Filter by delivery status.
+          schema:
+            type: string
+            enum:
+              - PENDING
+              - DELIVERED
+              - FAILED
+        - in: query
+          name: event_type
+          description: Filter by event type string.
+          schema:
+            type: string
+        - in: query
+          name: from
+          description: Filter deliveries on or after this timestamp.
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          description: Filter deliveries before this timestamp.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Paginated webhook deliveries with attempt history.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+              examples:
+                filtered:
+                  value:
+                    data:
+                      - id: cmf1delivery123
+                        event_type: payment_intent.succeeded
+                        status: DELIVERED
+                        delivered_at: 2026-03-01T10:00:00.000Z
+                        attempts:
+                          - attempt_number: 1
+                            response_status: 200
+                    pagination:
+                      page: 1
+                      pageSize: 10
+                      total: 1
+                      hasMore: false
+        "400":
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_deliveries/{id}:
+    get:
+      summary: Retrieve a webhook delivery
+      description: Returns a single webhook delivery with its full attempt history.
+      x-platform:
+        kind: resource
+        entity: WebhookDelivery
+        affectsLedger: false
+      operationId: getWebhookDelivery
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Webhook delivery with attempts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook_delivery:
+                    $ref: "#/components/schemas/WebhookDelivery"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook delivery not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_deliveries/resend:
+    post:
+      summary: Resend failed webhook deliveries
+      description: >
+        Finds all FAILED deliveries in the given time range and re-dispatches them. Limited to 100 deliveries per
+        request.
+      x-platform:
+        kind: transition
+        entity: WebhookDelivery
+        stateChanges:
+          - resent
+        affectsLedger: false
+      operationId: resendWebhookDeliveries
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - from
+                - to
+              properties:
+                from:
+                  type: string
+                  format: date-time
+                  description: Start of time range (inclusive).
+                to:
+                  type: string
+                  format: date-time
+                  description: End of time range (inclusive).
+            examples:
+              lastHour:
+                value:
+                  from: 2026-03-01T09:00:00.000Z
+                  to: 2026-03-01T10:00:00.000Z
+      responses:
+        "200":
+          description: Resend results.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  resent:
+                    type: integer
+                  delivered:
+                    type: integer
+                  failed:
+                    type: integer
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        delivery_id:
+                          type: string
+                        delivered:
+                          type: boolean
+                        response_status:
+                          type: integer
+              examples:
+                resendResult:
+                  value:
+                    resent: 5
+                    delivered: 3
+                    failed: 2
+                    results:
+                      - delivery_id: cmf1del001
+                        delivered: true
+                        response_status: 200
+        "400":
+          description: Invalid payload or time range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/webhook_deliveries/{id}/replay:
+    post:
+      summary: Replay a webhook delivery
+      description: Creates a new delivery attempt for an existing webhook delivery.
+      x-platform:
+        kind: transition
+        entity: WebhookDelivery
+        stateChanges:
+          - replayed
+        emitsEvents:
+          - webhook.delivery.replayed
+        affectsLedger: false
+      operationId: replayWebhookDelivery
+      tags:
+        - Webhooks
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Replay attempt created; result returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_id:
+                    type: string
+                  attempt_number:
+                    type: integer
+                  delivered:
+                    type: boolean
+                  response_status:
+                    type: integer
+                    nullable: true
+              examples:
+                replayed:
+                  value:
+                    delivery_id: cmf1delivery123
+                    attempt_number: 2
+                    delivered: true
+                    response_status: 200
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook delivery not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/events:
+    get:
+      summary: List events
+      description: >
+        Returns a cursor-paginated list of events for the authenticated merchant. Supports filtering by type,
+        entity_type, and entity_id. Uses cursor-based pagination with starting_after / ending_before semantics.
+      x-platform:
+        kind: resource
+        entity: Event
+        affectsLedger: false
+      operationId: listEvents
+      tags:
+        - Events
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - in: query
+          name: type
+          description: Filter by event type (e.g. payment_intent.succeeded).
+          schema:
+            type: string
+        - in: query
+          name: entity_type
+          description: Filter by entity type (e.g. PaymentIntent).
+          schema:
+            type: string
+        - in: query
+          name: entity_id
+          description: Filter by entity ID.
+          schema:
+            type: string
+        - in: query
+          name: starting_after
+          description: Cursor for forward pagination — event ID to start after.
+          schema:
+            type: string
+        - in: query
+          name: ending_before
+          description: Cursor for backward pagination — event ID to end before.
+          schema:
+            type: string
+        - in: query
+          name: limit
+          description: Number of results to return (1–100, default 10).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        "200":
+          description: Cursor-paginated list of events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - has_more
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  has_more:
+                    type: boolean
+              examples:
+                events:
+                  value:
+                    data:
+                      - id: evt_abc123
+                        type: payment_intent.succeeded
+                        entity_type: PaymentIntent
+                        entity_id: pi_xyz789
+                        payload: {}
+                        created_at: 2026-03-01T10:00:00.000Z
+                    has_more: true
+        "400":
+          description: Invalid query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/events/{id}:
+    get:
+      summary: Retrieve an event
+      description: Returns a single event by ID for the authenticated merchant.
+      x-platform:
+        kind: resource
+        entity: Event
+        affectsLedger: false
+      operationId: getEvent
+      tags:
+        - Events
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Event details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event:
+                    $ref: "#/components/schemas/Event"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Event not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/cron/webhooks/retry:
+    get:
+      summary: Run webhook retry processor (Vercel Cron)
+      description: |
+        GET variant for Vercel Cron which sends GET requests. Identical behavior to the POST variant.
+      x-platform:
+        kind: cron
+        entity: WebhookDelivery
+        affectsLedger: false
+      operationId: runWebhookRetryCronGet
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retry queue processed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  processed:
+                    type: integer
+                  delivered:
+                    type: integer
+                  failed:
+                    type: integer
+              examples:
+                processed:
+                  value:
+                    status: ok
+                    processed: 2
+                    delivered: 1
+                    failed: 1
+        "202":
+          description: Lock held — skipped.
+          content:
+            application/json:
+              examples:
+                locked:
+                  value:
+                    status: locked
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Run webhook retry processor
+      description: >
+        Internal cron endpoint processing eligible pending webhook deliveries with exponential backoff. Protected by
+        cron secret or Vercel Cron header.
+      x-platform:
+        kind: cron
+        entity: WebhookDelivery
+        affectsLedger: false
+      operationId: runWebhookRetryCron
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Retry queue processed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  processed:
+                    type: integer
+                  delivered:
+                    type: integer
+                  failed:
+                    type: integer
+              examples:
+                processed:
+                  value:
+                    status: ok
+                    processed: 2
+                    delivered: 1
+                    failed: 1
+        "202":
+          description: Lock held — skipped.
+          content:
+            application/json:
+              examples:
+                locked:
+                  value:
+                    status: locked
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/cron/billing/run:
+    get:
+      summary: Run billing cycle (Vercel Cron)
+      description: >
+        GET variant for Vercel Cron. Finds active subscriptions whose current period has ended, creates invoices, and
+        advances subscription periods.
+      x-platform:
+        kind: cron
+        entity: Invoice
+        affectsLedger: true
+      operationId: runBillingCronGet
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Billing run completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  processed:
+                    type: integer
+                  invoices_created:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    processed: 5
+                    invoices_created: 5
+        "202":
+          description: Lock held — skipped.
+          content:
+            application/json:
+              examples:
+                locked:
+                  value:
+                    status: locked
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Run billing cycle
+      description: >
+        Internal cron endpoint that processes active subscriptions whose current period has ended. Creates invoices,
+        advances subscription periods, and emits domain events. Protected by cron secret or Vercel Cron header.
+      x-platform:
+        kind: cron
+        entity: Invoice
+        affectsLedger: true
+      operationId: runBillingCron
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Billing run completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  processed:
+                    type: integer
+                  invoices_created:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    processed: 5
+                    invoices_created: 5
+        "202":
+          description: Lock held — skipped.
+          content:
+            application/json:
+              examples:
+                locked:
+                  value:
+                    status: locked
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/cron/reconciliation/run:
+    get:
+      summary: Run reconciliation review (Vercel Cron)
+      description: |
+        GET variant for Vercel Cron. Transitions OPEN recon periods whose end date has passed to IN_REVIEW status.
+      x-platform:
+        kind: cron
+        entity: ReconPeriod
+        affectsLedger: false
+      operationId: runReconciliationCronGet
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reconciliation review completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  periods_reviewed:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    periods_reviewed: 3
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Run reconciliation review
+      description: >
+        Internal cron endpoint that finds all OPEN reconciliation periods whose end date has passed and transitions them
+        to IN_REVIEW status.
+      x-platform:
+        kind: cron
+        entity: ReconPeriod
+        affectsLedger: false
+      operationId: runReconciliationCron
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Reconciliation review completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  periods_reviewed:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    periods_reviewed: 3
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/cron/exports/run:
+    get:
+      summary: Run scheduled exports (Vercel Cron)
+      description: >
+        GET variant for Vercel Cron. Processes active export schedules whose nextRunAt has passed, creates Export
+        records, and advances the schedule.
+      x-platform:
+        kind: cron
+        entity: Export
+        affectsLedger: false
+      operationId: runExportsCronGet
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Exports run completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  exports_created:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    exports_created: 2
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Run scheduled exports
+      description: >
+        Internal cron endpoint that finds active export schedules whose nextRunAt has passed, creates Export records,
+        and updates schedule timing.
+      x-platform:
+        kind: cron
+        entity: Export
+        affectsLedger: false
+      operationId: runExportsCron
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Exports run completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  exports_created:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    exports_created: 2
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/cron/risk/run:
+    get:
+      summary: Run risk list sweep (Vercel Cron)
+      description: |
+        GET variant for Vercel Cron. Deletes expired entries from risk lists.
+      x-platform:
+        kind: cron
+        entity: RiskListEntry
+        affectsLedger: false
+      operationId: runRiskSweepCronGet
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Risk sweep completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  expired_entries_removed:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    expired_entries_removed: 7
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Run risk list sweep
+      description: >
+        Internal cron endpoint that removes expired entries from risk allow/block lists based on their expiresAt
+        timestamp.
+      x-platform:
+        kind: cron
+        entity: RiskListEntry
+        affectsLedger: false
+      operationId: runRiskSweepCron
+      tags:
+        - Cron
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - in: header
+          name: x-cron-secret
+          required: false
+          description: Shared secret for cron caller authentication.
+          schema:
+            type: string
+        - in: header
+          name: x-vercel-cron
+          required: false
+          description: Set to "1" by Vercel Cron.
+          schema:
+            type: string
+            example: "1"
+        - in: query
+          name: cron_secret
+          required: false
+          description: Fallback cron secret as query param.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Risk sweep completed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  expired_entries_removed:
+                    type: integer
+              examples:
+                success:
+                  value:
+                    status: ok
+                    expired_entries_removed: 7
+        "401":
+          description: Invalid cron secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding:
+    get:
+      summary: List onboarding profiles
+      description: Returns a paginated list of onboarding profiles with optional status filter.
+      x-platform:
+        kind: resource
+        entity: OnboardingProfile
+        affectsLedger: false
+      operationId: listOnboardingProfiles
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: status
+          description: Filter by onboarding status.
+          schema:
+            type: string
+            enum:
+              - STARTED
+              - SUBMITTED
+              - UNDER_REVIEW
+              - APPROVED
+              - DENIED
+              - WITHDRAWN
+      responses:
+        "200":
+          description: Paginated onboarding profiles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OnboardingProfile"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create onboarding profile
+      description: |
+        Creates a new onboarding profile for a merchant. Each merchant may have at most one profile.
+      x-platform:
+        kind: resource
+        entity: OnboardingProfile
+        emitsEvents:
+          - onboarding.profile.created
+        affectsLedger: false
+        workflowRefs:
+          - onboarding_full
+      operationId: createOnboardingProfile
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - merchant_id
+              properties:
+                merchant_id:
+                  type: string
+                business_name:
+                  type: string
+                business_type:
+                  type: string
+                tax_id:
+                  type: string
+                website:
+                  type: string
+                  format: uri
+                country:
+                  type: string
+                  minLength: 2
+                  maxLength: 2
+                metadata:
+                  type: object
+            examples:
+              basic:
+                value:
+                  merchant_id: cmf1merchant123
+                  business_name: Acme Corp
+                  business_type: llc
+                  country: US
+      responses:
+        "201":
+          description: Onboarding profile created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingProfile"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Profile already exists for this merchant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}:
+    get:
+      summary: Get onboarding profile
+      description: Returns a single onboarding profile by ID.
+      x-platform:
+        kind: resource
+        entity: OnboardingProfile
+        affectsLedger: false
+      operationId: getOnboardingProfile
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Onboarding profile found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingProfile"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update onboarding profile
+      description: >
+        Updates fields on an onboarding profile. Supports state transitions via the status field, validated against the
+        onboarding state machine.
+      x-platform:
+        kind: transition
+        entity: OnboardingProfile
+        stateChanges:
+          - STARTED -> SUBMITTED
+          - SUBMITTED -> UNDER_REVIEW
+          - UNDER_REVIEW -> APPROVED | DENIED
+        emitsEvents:
+          - onboarding.profile.updated
+          - onboarding.profile.submitted
+          - onboarding.profile.approved
+          - onboarding.profile.denied
+        affectsLedger: false
+      operationId: updateOnboardingProfile
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                business_name:
+                  type: string
+                business_type:
+                  type: string
+                tax_id:
+                  type: string
+                website:
+                  type: string
+                  format: uri
+                country:
+                  type: string
+                  minLength: 2
+                  maxLength: 2
+                status:
+                  type: string
+                  enum:
+                    - STARTED
+                    - SUBMITTED
+                    - UNDER_REVIEW
+                    - APPROVED
+                    - DENIED
+                    - WITHDRAWN
+                metadata:
+                  type: object
+      responses:
+        "200":
+          description: Profile updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingProfile"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Invalid state transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete onboarding profile
+      description: Deletes a non-terminal onboarding profile and all nested resources.
+      x-platform:
+        kind: transition
+        entity: OnboardingProfile
+        emitsEvents:
+          - onboarding.profile.deleted
+        affectsLedger: false
+        stateChanges:
+          - active -> deleted
+      operationId: deleteOnboardingProfile
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Profile deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      deleted:
+                        type: boolean
+        "400":
+          description: Cannot delete terminal-state profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/submit:
+    post:
+      summary: Submit onboarding profile for review
+      description: |
+        Transitions the profile from STARTED to SUBMITTED. Requires business_name and country to be set.
+      x-platform:
+        kind: transition
+        entity: OnboardingProfile
+        stateChanges:
+          - STARTED -> SUBMITTED
+        emitsEvents:
+          - onboarding.profile.submitted
+        affectsLedger: false
+        workflowRefs:
+          - onboarding_full
+      operationId: submitOnboarding
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Profile submitted for review.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingProfile"
+        "400":
+          description: Incomplete profile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Invalid state transition.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/owners:
+    get:
+      summary: List owners for onboarding profile
+      description: Returns a paginated list of beneficial owners for the profile.
+      x-platform:
+        kind: resource
+        entity: Owner
+        affectsLedger: false
+      operationId: listOnboardingOwners
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of owners.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Owner"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Add owner to onboarding profile
+      description: Creates a beneficial owner record attached to the onboarding profile.
+      x-platform:
+        kind: resource
+        entity: Owner
+        emitsEvents:
+          - onboarding.owner.created
+        affectsLedger: false
+      operationId: createOnboardingOwner
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - first_name
+                - last_name
+              properties:
+                first_name:
+                  type: string
+                last_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                ownership_percentage:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                title:
+                  type: string
+            examples:
+              basic:
+                value:
+                  first_name: Jane
+                  last_name: Smith
+                  email: jane@example.com
+                  ownership_percentage: 51
+                  title: CEO
+      responses:
+        "201":
+          description: Owner created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Owner"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/owners/{ownerId}:
+    get:
+      summary: Get owner by ID
+      description: Returns a single beneficial owner by ID.
+      x-platform:
+        kind: resource
+        entity: Owner
+        affectsLedger: false
+      operationId: getOnboardingOwner
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: ownerId
+          required: true
+          description: Owner identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Owner found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Owner"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Owner not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update owner
+      description: Updates fields on a beneficial owner record.
+      x-platform:
+        kind: resource
+        entity: Owner
+        emitsEvents:
+          - onboarding.owner.updated
+        affectsLedger: false
+      operationId: updateOnboardingOwner
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: ownerId
+          required: true
+          description: Owner identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                first_name:
+                  type: string
+                last_name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                ownership_percentage:
+                  type: integer
+                  minimum: 0
+                  maximum: 100
+                title:
+                  type: string
+      responses:
+        "200":
+          description: Owner updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Owner"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Owner not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete owner
+      description: Removes a beneficial owner from the onboarding profile.
+      x-platform:
+        kind: resource
+        entity: Owner
+        emitsEvents:
+          - onboarding.owner.deleted
+        affectsLedger: false
+      operationId: deleteOnboardingOwner
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: ownerId
+          required: true
+          description: Owner identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Owner deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      deleted:
+                        type: boolean
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Owner not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/documents:
+    get:
+      summary: List documents for onboarding profile
+      description: Returns a paginated list of documents with optional status filter.
+      x-platform:
+        kind: resource
+        entity: Document
+        affectsLedger: false
+      operationId: listOnboardingDocuments
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: status
+          description: Filter by document review status.
+          schema:
+            type: string
+            enum:
+              - PENDING
+              - VERIFIED
+              - REJECTED
+      responses:
+        "200":
+          description: Paginated list of documents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OnboardingDocument"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Upload document metadata
+      description: >
+        Records document metadata for the onboarding profile. Actual file storage is external; this tracks the reference.
+      x-platform:
+        kind: resource
+        entity: Document
+        emitsEvents:
+          - onboarding.document.created
+        affectsLedger: false
+      operationId: createOnboardingDocument
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - file_name
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - GOVERNMENT_ID
+                    - PROOF_OF_ADDRESS
+                    - BANK_STATEMENT
+                    - TAX_RETURN
+                    - ARTICLES_OF_INCORPORATION
+                    - OTHER
+                file_name:
+                  type: string
+                file_size:
+                  type: integer
+                mime_type:
+                  type: string
+            examples:
+              basic:
+                value:
+                  type: GOVERNMENT_ID
+                  file_name: passport.pdf
+                  file_size: 204800
+                  mime_type: application/pdf
+      responses:
+        "201":
+          description: Document record created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingDocument"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/documents/{docId}:
+    get:
+      summary: Get document by ID
+      description: Returns a single document record.
+      x-platform:
+        kind: resource
+        entity: Document
+        affectsLedger: false
+      operationId: getOnboardingDocument
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: docId
+          required: true
+          description: Document identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Document found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingDocument"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Review document
+      description: |
+        Sets the review status of a document to VERIFIED or REJECTED, with an optional review note.
+      x-platform:
+        kind: transition
+        entity: Document
+        stateChanges:
+          - PENDING -> VERIFIED | REJECTED
+        emitsEvents:
+          - onboarding.document.verified
+          - onboarding.document.rejected
+        affectsLedger: false
+      operationId: reviewOnboardingDocument
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: docId
+          required: true
+          description: Document identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - VERIFIED
+                    - REJECTED
+                review_note:
+                  type: string
+      responses:
+        "200":
+          description: Document reviewed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingDocument"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Document not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/bank_accounts:
+    get:
+      summary: List bank accounts
+      description: Returns a paginated list of bank accounts for the onboarding profile.
+      x-platform:
+        kind: resource
+        entity: BankAccount
+        affectsLedger: false
+      operationId: listOnboardingBankAccounts
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of bank accounts.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OnboardingBankAccount"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Add bank account
+      description: |
+        Adds a bank account to the onboarding profile. If marked as primary, any existing primary account is demoted.
+      x-platform:
+        kind: resource
+        entity: BankAccount
+        emitsEvents:
+          - onboarding.bank_account.created
+        affectsLedger: false
+      operationId: createOnboardingBankAccount
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - bank_name
+                - account_holder_name
+                - routing_number
+                - account_number_last4
+              properties:
+                bank_name:
+                  type: string
+                account_holder_name:
+                  type: string
+                routing_number:
+                  type: string
+                account_number_last4:
+                  type: string
+                  minLength: 4
+                  maxLength: 4
+                account_type:
+                  type: string
+                  enum:
+                    - checking
+                    - savings
+                  default: checking
+                is_primary:
+                  type: boolean
+                  default: false
+            examples:
+              basic:
+                value:
+                  bank_name: First National Bank
+                  account_holder_name: Acme Corp
+                  routing_number: "021000021"
+                  account_number_last4: "6789"
+                  account_type: checking
+                  is_primary: true
+      responses:
+        "201":
+          description: Bank account created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingBankAccount"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/onboarding/{id}/bank_accounts/{baId}:
+    get:
+      summary: Get bank account by ID
+      description: Returns a single bank account record.
+      x-platform:
+        kind: resource
+        entity: BankAccount
+        affectsLedger: false
+      operationId: getOnboardingBankAccount
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: baId
+          required: true
+          description: Bank account identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bank account found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingBankAccount"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bank account not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update bank account
+      description: Updates fields on a bank account. Setting is_primary demotes other accounts.
+      x-platform:
+        kind: resource
+        entity: BankAccount
+        emitsEvents:
+          - onboarding.bank_account.updated
+        affectsLedger: false
+      operationId: updateOnboardingBankAccount
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: baId
+          required: true
+          description: Bank account identifier.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                bank_name:
+                  type: string
+                account_holder_name:
+                  type: string
+                account_type:
+                  type: string
+                  enum:
+                    - checking
+                    - savings
+                is_verified:
+                  type: boolean
+                is_primary:
+                  type: boolean
+      responses:
+        "200":
+          description: Bank account updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/OnboardingBankAccount"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bank account not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete bank account
+      description: Removes a bank account from the onboarding profile.
+      x-platform:
+        kind: resource
+        entity: BankAccount
+        emitsEvents:
+          - onboarding.bank_account.deleted
+        affectsLedger: false
+      operationId: deleteOnboardingBankAccount
+      tags:
+        - Onboarding
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - in: path
+          name: baId
+          required: true
+          description: Bank account identifier.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Bank account deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      deleted:
+                        type: boolean
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Bank account not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/underwriting/cases:
+    get:
+      summary: List underwriting cases
+      description: Returns a paginated list of underwriting cases with optional filters.
+      x-platform:
+        kind: resource
+        entity: UnderwritingCase
+        affectsLedger: false
+      operationId: listUnderwritingCases
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: status
+          description: Filter by case status.
+          schema:
+            type: string
+        - in: query
+          name: onboarding_profile_id
+          description: Filter by onboarding profile.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated underwriting cases.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UnderwritingCase"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create underwriting case
+      description: |
+        Opens a new underwriting case linked to an onboarding profile for manual or automated risk review.
+      x-platform:
+        kind: resource
+        entity: UnderwritingCase
+        emitsEvents:
+          - underwriting.case.created
+        affectsLedger: false
+        workflowRefs:
+          - onboarding_full
+      operationId: createUnderwritingCase
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - onboarding_profile_id
+              properties:
+                onboarding_profile_id:
+                  type: string
+                assigned_to:
+                  type: string
+                risk_score:
+                  type: integer
+                  minimum: 0
+                  maximum: 1000
+                notes:
+                  type: string
+            examples:
+              basic:
+                value:
+                  onboarding_profile_id: cmf1profile123
+                  assigned_to: analyst@example.com
+                  risk_score: 35
+      responses:
+        "201":
+          description: Underwriting case created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/UnderwritingCase"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Onboarding profile not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/underwriting/cases/{id}:
+    get:
+      summary: Get underwriting case
+      description: Returns a single underwriting case by ID.
+      x-platform:
+        kind: resource
+        entity: UnderwritingCase
+        affectsLedger: false
+        workflowRefs:
+          - onboarding_full
+      operationId: getUnderwritingCase
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Underwriting case found.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/UnderwritingCase"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update underwriting case
+      description: Updates assignment, risk score, notes, or status of an underwriting case.
+      x-platform:
+        kind: resource
+        entity: UnderwritingCase
+        emitsEvents:
+          - underwriting.case.updated
+        affectsLedger: false
+      operationId: updateUnderwritingCase
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                assigned_to:
+                  type: string
+                risk_score:
+                  type: integer
+                  minimum: 0
+                  maximum: 1000
+                notes:
+                  type: string
+                status:
+                  type: string
+      responses:
+        "200":
+          description: Underwriting case updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/UnderwritingCase"
+        "400":
+          description: Invalid request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Case not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/underwriting/cases/{id}/decisions:
+    get:
+      summary: List decisions for underwriting case
+      description: Returns a paginated list of decisions for a given underwriting case.
+      x-platform:
+        kind: resource
+        entity: UnderwritingDecision
+        affectsLedger: false
+      operationId: listUnderwritingDecisions
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of decisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UnderwritingDecision"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Underwriting case not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Add underwriting decision
+      description: |
+        Records a decision on an underwriting case. APPROVED/DENIED results automatically update the case status.
+      x-platform:
+        kind: transition
+        entity: UnderwritingDecision
+        emitsEvents:
+          - underwriting.decision.approved
+          - underwriting.decision.denied
+          - underwriting.decision.escalated
+          - underwriting.decision.pending_info
+        affectsLedger: false
+        workflowRefs:
+          - onboarding_full
+        stateChanges:
+          - pending -> decided
+      operationId: createUnderwritingDecision
+      tags:
+        - Underwriting
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - result
+              properties:
+                result:
+                  type: string
+                  enum:
+                    - APPROVED
+                    - DENIED
+                    - ESCALATED
+                    - PENDING_INFO
+                reason:
+                  type: string
+                decided_by:
+                  type: string
+            examples:
+              approved:
+                value:
+                  result: APPROVED
+                  reason: Low risk profile, all documents verified
+                  decided_by: analyst@example.com
+      responses:
+        "201":
+          description: Decision recorded.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/UnderwritingDecision"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Underwriting case not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/events:
+    get:
+      summary: List all events (admin)
+      description: |
+        Platform-wide event listing with optional filters by merchant, event type, entity type, and entity ID.
+      x-platform:
+        kind: resource
+        entity: Event
+        affectsLedger: false
+      operationId: adminListEvents
+      tags:
+        - Events
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: merchant_id
+          description: Filter by merchant ID.
+          schema:
+            type: string
+        - in: query
+          name: type
+          description: Filter by event type.
+          schema:
+            type: string
+        - in: query
+          name: entity_type
+          description: Filter by entity type.
+          schema:
+            type: string
+        - in: query
+          name: entity_id
+          description: Filter by entity ID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of events across all merchants.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Event"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/events/{id}:
+    get:
+      summary: Retrieve an event (admin)
+      description: Returns a single event by ID. No merchant scoping.
+      x-platform:
+        kind: resource
+        entity: Event
+        affectsLedger: false
+      operationId: adminGetEvent
+      tags:
+        - Events
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Event details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  event:
+                    $ref: "#/components/schemas/Event"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Event not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/webhooks/endpoints:
+    get:
+      summary: List all webhook endpoints (admin)
+      description: |
+        Platform-wide webhook endpoint listing with optional merchant and active status filters.
+      x-platform:
+        kind: resource
+        entity: WebhookEndpoint
+        affectsLedger: false
+      operationId: adminListWebhookEndpoints
+      tags:
+        - Webhooks
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: merchant_id
+          description: Filter by merchant ID.
+          schema:
+            type: string
+        - in: query
+          name: is_active
+          description: Filter by active status.
+          schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+      responses:
+        "200":
+          description: Paginated list of webhook endpoints.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookEndpoint"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/webhooks/deliveries:
+    get:
+      summary: List all webhook deliveries (admin)
+      description: |
+        Platform-wide webhook delivery listing with optional filters by merchant, status, event type, and date range.
+      x-platform:
+        kind: resource
+        entity: WebhookDelivery
+        affectsLedger: false
+      operationId: adminListWebhookDeliveries
+      tags:
+        - Webhooks
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: merchant_id
+          description: Filter by merchant ID.
+          schema:
+            type: string
+        - in: query
+          name: status
+          description: Filter by delivery status.
+          schema:
+            type: string
+            enum:
+              - PENDING
+              - DELIVERED
+              - FAILED
+        - in: query
+          name: event_type
+          description: Filter by event type.
+          schema:
+            type: string
+        - in: query
+          name: from
+          description: Filter deliveries on or after this timestamp.
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          description: Filter deliveries before this timestamp.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Paginated list of webhook deliveries.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WebhookDelivery"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/webhooks/deliveries/{id}/retry:
+    post:
+      summary: Retry a webhook delivery (admin)
+      description: |
+        Re-dispatches a specific webhook delivery. Creates a new attempt regardless of the current delivery status.
+      x-platform:
+        kind: transition
+        entity: WebhookDelivery
+        stateChanges:
+          - retried
+        affectsLedger: false
+      operationId: adminRetryWebhookDelivery
+      tags:
+        - Webhooks
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Retry result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  delivery_id:
+                    type: string
+                  attempt_number:
+                    type: integer
+                  delivered:
+                    type: boolean
+                  response_status:
+                    type: integer
+              examples:
+                retried:
+                  value:
+                    delivery_id: cmf1delivery456
+                    attempt_number: 3
+                    delivered: true
+                    response_status: 200
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Webhook delivery not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/reports:
+    get:
+      summary: List reports
+      description: Returns a paginated list of reports for the authenticated merchant.
+      x-platform:
+        kind: resource
+        entity: Report
+        affectsLedger: false
+      operationId: listReports
+      tags:
+        - Reports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - processing
+              - completed
+              - failed
+      responses:
+        "200":
+          description: Paginated list of reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Report"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create report
+      description: Queues a new report for generation.
+      x-platform:
+        kind: resource
+        entity: Report
+        emitsEvents:
+          - report.created
+        affectsLedger: false
+      operationId: createReport
+      tags:
+        - Reports
+      security:
+        - MerchantKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - name
+              properties:
+                type:
+                  type: string
+                name:
+                  type: string
+                parameters:
+                  type: object
+            examples:
+              transactions:
+                value:
+                  type: transaction_summary
+                  name: Q1 Transaction Summary
+                  parameters:
+                    start_date: 2026-01-01
+                    end_date: 2026-03-31
+      responses:
+        "201":
+          description: Report queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/Report"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/reports/{id}:
+    get:
+      summary: Get report
+      description: Returns a single report by ID.
+      x-platform:
+        kind: resource
+        entity: Report
+        affectsLedger: false
+      operationId: getReport
+      tags:
+        - Reports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Report details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/Report"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/reports/{id}/cancel:
+    post:
+      summary: Cancel report
+      description: Cancels a queued report. Only QUEUED reports can be canceled.
+      x-platform:
+        kind: transition
+        entity: Report
+        emitsEvents:
+          - report.canceled
+        affectsLedger: false
+        stateChanges:
+          - processing -> canceled
+      operationId: cancelReport
+      tags:
+        - Reports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Report canceled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/Report"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Report is not in a cancelable state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/exports:
+    get:
+      summary: List exports
+      description: Returns a paginated list of exports for the authenticated merchant.
+      x-platform:
+        kind: resource
+        entity: Export
+        affectsLedger: false
+      operationId: listExports
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - processing
+              - completed
+              - failed
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum:
+              - csv
+              - json
+              - pdf
+      responses:
+        "200":
+          description: Paginated list of exports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Export"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create export
+      description: Queues a new data export for generation.
+      x-platform:
+        kind: resource
+        entity: Export
+        emitsEvents:
+          - export.created
+        affectsLedger: false
+      operationId: createExport
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+              properties:
+                type:
+                  type: string
+                format:
+                  type: string
+                  enum:
+                    - csv
+                    - json
+                    - pdf
+                  default: csv
+                parameters:
+                  type: object
+            examples:
+              csv_export:
+                value:
+                  type: transactions
+                  format: csv
+                  parameters:
+                    start_date: 2026-01-01
+                    end_date: 2026-03-31
+      responses:
+        "201":
+          description: Export queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export:
+                    $ref: "#/components/schemas/Export"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/exports/{id}:
+    get:
+      summary: Get export
+      description: Returns a single export by ID.
+      x-platform:
+        kind: resource
+        entity: Export
+        affectsLedger: false
+      operationId: getExport
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Export details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export:
+                    $ref: "#/components/schemas/Export"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/exports/{id}/cancel:
+    post:
+      summary: Cancel export
+      description: Cancels a queued export. Only QUEUED exports can be canceled.
+      x-platform:
+        kind: transition
+        entity: Export
+        emitsEvents:
+          - export.canceled
+        affectsLedger: false
+        stateChanges:
+          - processing -> canceled
+      operationId: cancelExport
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Export canceled.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export:
+                    $ref: "#/components/schemas/Export"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Export is not in a cancelable state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/export_schedules:
+    get:
+      summary: List export schedules
+      description: Returns a paginated list of export schedules for the authenticated merchant.
+      x-platform:
+        kind: resource
+        entity: ExportSchedule
+        affectsLedger: false
+      operationId: listExportSchedules
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: is_active
+          schema:
+            type: string
+            enum:
+              - "true"
+              - "false"
+      responses:
+        "200":
+          description: Paginated list of export schedules.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ExportSchedule"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create export schedule
+      description: Creates a recurring export schedule.
+      x-platform:
+        kind: resource
+        entity: ExportSchedule
+        emitsEvents:
+          - export_schedule.created
+        affectsLedger: false
+      operationId: createExportSchedule
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - frequency
+              properties:
+                type:
+                  type: string
+                format:
+                  type: string
+                  enum:
+                    - csv
+                    - json
+                    - pdf
+                  default: csv
+                frequency:
+                  type: string
+                  enum:
+                    - daily
+                    - weekly
+                    - monthly
+                parameters:
+                  type: object
+            examples:
+              daily_csv:
+                value:
+                  type: transactions
+                  format: csv
+                  frequency: daily
+      responses:
+        "201":
+          description: Export schedule created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_schedule:
+                    $ref: "#/components/schemas/ExportSchedule"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/export_schedules/{id}:
+    get:
+      summary: Get export schedule
+      description: Returns a single export schedule by ID.
+      x-platform:
+        kind: resource
+        entity: ExportSchedule
+        affectsLedger: false
+      operationId: getExportSchedule
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Export schedule details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_schedule:
+                    $ref: "#/components/schemas/ExportSchedule"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export schedule not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update export schedule
+      description: Updates frequency, format, parameters, or active status of an export schedule.
+      x-platform:
+        kind: transition
+        entity: ExportSchedule
+        emitsEvents:
+          - export_schedule.updated
+        affectsLedger: false
+        stateChanges:
+          - metadata_updated
+      operationId: updateExportSchedule
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                frequency:
+                  type: string
+                  enum:
+                    - daily
+                    - weekly
+                    - monthly
+                format:
+                  type: string
+                  enum:
+                    - csv
+                    - json
+                    - pdf
+                parameters:
+                  type: object
+                is_active:
+                  type: boolean
+      responses:
+        "200":
+          description: Export schedule updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_schedule:
+                    $ref: "#/components/schemas/ExportSchedule"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export schedule not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      summary: Delete export schedule
+      description: Permanently deletes an export schedule.
+      x-platform:
+        kind: transition
+        entity: ExportSchedule
+        emitsEvents:
+          - export_schedule.deleted
+        affectsLedger: false
+        stateChanges:
+          - active -> deleted
+      operationId: deleteExportSchedule
+      tags:
+        - Exports
+      security:
+        - MerchantKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Export schedule deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export schedule not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/reports:
+    get:
+      summary: List all reports (admin)
+      description: Returns a paginated list of all reports across merchants.
+      x-platform:
+        kind: resource
+        entity: Report
+        affectsLedger: false
+      operationId: adminListReports
+      tags:
+        - Reports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: merchant_id
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - processing
+              - completed
+              - failed
+      responses:
+        "200":
+          description: Paginated list of reports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Report"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/reports/{id}:
+    get:
+      summary: Get report (admin)
+      description: Returns a single report by ID (admin access).
+      x-platform:
+        kind: resource
+        entity: Report
+        affectsLedger: false
+      operationId: adminGetReport
+      tags:
+        - Reports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Report details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/Report"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update report status (admin)
+      description: Updates the status and metadata of a report (admin processing).
+      x-platform:
+        kind: transition
+        entity: Report
+        emitsEvents:
+          - report.processing
+          - report.completed
+          - report.failed
+        affectsLedger: false
+        stateChanges:
+          - metadata_updated
+      operationId: adminUpdateReport
+      tags:
+        - Reports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - queued
+                    - processing
+                    - completed
+                    - failed
+                result_url:
+                  type: string
+                  format: uri
+                error_message:
+                  type: string
+      responses:
+        "200":
+          description: Report updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  report:
+                    $ref: "#/components/schemas/Report"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Report not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/exports:
+    get:
+      summary: List all exports (admin)
+      description: Returns a paginated list of all exports across merchants.
+      x-platform:
+        kind: resource
+        entity: Export
+        affectsLedger: false
+      operationId: adminListExports
+      tags:
+        - Exports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+        - in: query
+          name: merchant_id
+          schema:
+            type: string
+        - in: query
+          name: type
+          schema:
+            type: string
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - queued
+              - processing
+              - completed
+              - failed
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum:
+              - csv
+              - json
+              - pdf
+      responses:
+        "200":
+          description: Paginated list of exports.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Export"
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/exports/{id}:
+    get:
+      summary: Get export (admin)
+      description: Returns a single export by ID (admin access).
+      x-platform:
+        kind: resource
+        entity: Export
+        affectsLedger: false
+      operationId: adminGetExport
+      tags:
+        - Exports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Export details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export:
+                    $ref: "#/components/schemas/Export"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update export status (admin)
+      description: Updates the status and metadata of an export (admin processing).
+      x-platform:
+        kind: transition
+        entity: Export
+        emitsEvents:
+          - export.processing
+          - export.completed
+          - export.failed
+        affectsLedger: false
+        stateChanges:
+          - metadata_updated
+      operationId: adminUpdateExport
+      tags:
+        - Exports
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - status
+              properties:
+                status:
+                  type: string
+                  enum:
+                    - queued
+                    - processing
+                    - completed
+                    - failed
+                result_url:
+                  type: string
+                  format: uri
+                error_message:
+                  type: string
+                row_count:
+                  type: integer
+                  minimum: 0
+      responses:
+        "200":
+          description: Export updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export:
+                    $ref: "#/components/schemas/Export"
+        "400":
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Export not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /api/internal/orgs:
+    get:
+      summary: List all organizations
+      description: Returns a paginated list of all organizations.
+      x-platform:
+        kind: resource
+        entity: Org
+        affectsLedger: false
+      operationId: listOrgs
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of organizations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": &a1
+          description: Missing or invalid API key.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403": &a2
+          description: Platform admin access required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      summary: Create an organization
+      description: Creates a new organization.
+      x-platform:
+        kind: resource
+        entity: Org
+        affectsLedger: false
+      operationId: createOrg
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "201":
+          description: Organization created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": &a4
+          description: Invalid request payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401": *a1
+        "403": *a2
+  /api/internal/orgs/{orgId}:
+    get:
+      summary: Get organization by ID
+      description: Returns a single organization by ID.
+      x-platform:
+        kind: resource
+        entity: Org
+        affectsLedger: false
+      operationId: getOrg
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - &a3
+          in: path
+          name: orgId
+          required: true
+          description: Organization ID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Organization details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "401": *a1
+        "404": &a5
+          description: Resource not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      summary: Update organization
+      description: Updates fields on an organization.
+      x-platform:
+        kind: resource
+        entity: Org
+        affectsLedger: false
+      operationId: updateOrg
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "200":
+          description: Organization updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+    delete:
+      summary: Delete organization
+      description: Deletes an organization by ID.
+      x-platform:
+        kind: resource
+        entity: Org
+        affectsLedger: false
+      operationId: deleteOrg
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+      responses:
+        "200":
+          description: Organization deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                  - id
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/members:
+    get:
+      summary: List org members
+      description: Returns a paginated list of members for an organization.
+      x-platform:
+        kind: resource
+        entity: OrgMember
+        affectsLedger: false
+      operationId: listOrgMembers
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of org members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+        "404": *a5
+    post:
+      summary: Add member to org
+      description: Adds a member to an organization.
+      x-platform:
+        kind: resource
+        entity: OrgMember
+        affectsLedger: false
+      operationId: addOrgMember
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+                - role
+              properties:
+                user_id:
+                  type: string
+                role:
+                  type: string
+      responses:
+        "201":
+          description: Member added to organization.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/members/{id}:
+    get:
+      summary: Get org member
+      description: Returns a single org member by ID.
+      x-platform:
+        kind: resource
+        entity: OrgMember
+        affectsLedger: false
+      operationId: getOrgMember
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Org member details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "401": *a1
+        "404": *a5
+    patch:
+      summary: Update org member role
+      description: Updates the role of an org member.
+      x-platform:
+        kind: resource
+        entity: OrgMember
+        affectsLedger: false
+      operationId: updateOrgMember
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+      responses:
+        "200":
+          description: Org member updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+    delete:
+      summary: Remove org member
+      description: Removes a member from an organization.
+      x-platform:
+        kind: resource
+        entity: OrgMember
+        affectsLedger: false
+      operationId: removeOrgMember
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Member removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                  - id
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/roles:
+    get:
+      summary: List org roles
+      description: Returns a paginated list of roles for an organization.
+      x-platform:
+        kind: resource
+        entity: OrgRole
+        affectsLedger: false
+      operationId: listOrgRoles
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of org roles.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+    post:
+      summary: Create org role
+      description: Creates a new role for an organization.
+      x-platform:
+        kind: resource
+        entity: OrgRole
+        affectsLedger: false
+      operationId: createOrgRole
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "201":
+          description: Org role created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/roles/{id}:
+    get:
+      summary: Get org role
+      description: Returns a single org role by ID.
+      x-platform:
+        kind: resource
+        entity: OrgRole
+        affectsLedger: false
+      operationId: getOrgRole
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Org role details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "401": *a1
+        "404": *a5
+    patch:
+      summary: Update org role
+      description: Updates an org role.
+      x-platform:
+        kind: resource
+        entity: OrgRole
+        affectsLedger: false
+      operationId: updateOrgRole
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: Org role updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+    delete:
+      summary: Delete org role
+      description: Deletes an org role by ID.
+      x-platform:
+        kind: resource
+        entity: OrgRole
+        affectsLedger: false
+      operationId: deleteOrgRole
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Org role deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                  - id
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/audit_logs:
+    get:
+      summary: List org audit logs
+      description: Returns a paginated list of audit logs for an organization.
+      x-platform:
+        kind: resource
+        entity: AuditLog
+        affectsLedger: false
+      operationId: listOrgAuditLogs
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of org audit logs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+        "404": *a5
+  /api/internal/orgs/{orgId}/teams:
+    get:
+      summary: List teams in org
+      description: Returns a paginated list of teams for an organization.
+      x-platform:
+        kind: resource
+        entity: Team
+        affectsLedger: false
+      operationId: listTeams
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of teams.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+        "404": *a5
+    post:
+      summary: Create team
+      description: Creates a new team in an organization.
+      x-platform:
+        kind: resource
+        entity: Team
+        affectsLedger: false
+      operationId: createTeam
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "201":
+          description: Team created.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/teams/{teamId}:
+    get:
+      summary: Get team
+      description: Returns a single team by ID.
+      x-platform:
+        kind: resource
+        entity: Team
+        affectsLedger: false
+      operationId: getTeam
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - &a6
+          in: path
+          name: teamId
+          required: true
+          description: Team ID.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Team details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "401": *a1
+        "404": *a5
+    patch:
+      summary: Update team
+      description: Updates fields on a team.
+      x-platform:
+        kind: resource
+        entity: Team
+        affectsLedger: false
+      operationId: updateTeam
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "200":
+          description: Team updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+    delete:
+      summary: Delete team
+      description: Deletes a team by ID.
+      x-platform:
+        kind: resource
+        entity: Team
+        affectsLedger: false
+      operationId: deleteTeam
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - *a6
+      responses:
+        "200":
+          description: Team deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                  - id
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/teams/{teamId}/members:
+    get:
+      summary: List team members
+      description: Returns a paginated list of members for a team.
+      x-platform:
+        kind: resource
+        entity: TeamMember
+        affectsLedger: false
+      operationId: listTeamMembers
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - *a6
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of team members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+        "404": *a5
+    post:
+      summary: Add team member
+      description: Adds a member to a team.
+      x-platform:
+        kind: resource
+        entity: TeamMember
+        affectsLedger: false
+      operationId: addTeamMember
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - *a6
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_id
+              properties:
+                user_id:
+                  type: string
+                role:
+                  type: string
+      responses:
+        "201":
+          description: Member added to team.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+        "400": *a4
+        "401": *a1
+        "404": *a5
+  /api/internal/orgs/{orgId}/teams/{teamId}/members/{id}:
+    delete:
+      summary: Remove team member
+      description: Removes a member from a team.
+      x-platform:
+        kind: resource
+        entity: TeamMember
+        affectsLedger: false
+      operationId: removeTeamMember
+      tags:
+        - Teams
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - *a3
+        - *a6
+        - $ref: "#/components/parameters/PathId"
+      responses:
+        "200":
+          description: Team member removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - deleted
+                  - id
+                properties:
+                  deleted:
+                    type: boolean
+                  id:
+                    type: string
+        "401": *a1
+        "404": *a5
+  /api/internal/audit_logs:
+    get:
+      summary: List all audit logs
+      description: Returns a paginated list of platform-wide audit logs.
+      x-platform:
+        kind: resource
+        entity: AuditLog
+        affectsLedger: false
+      operationId: listAuditLogs
+      tags:
+        - Orgs
+      security:
+        - PlatformAdminKeyAuth: []
+      parameters:
+        - $ref: "#/components/parameters/PageParam"
+        - $ref: "#/components/parameters/PageSizeParam"
+      responses:
+        "200":
+          description: Paginated list of audit logs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - data
+                  - pagination
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  pagination:
+                    $ref: "#/components/schemas/PaginationMeta"
+        "401": *a1
+        "403": *a2
+components:
+  securitySchemes:
+    MerchantKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        Bearer API key for merchant-scoped operations. Pass as `Authorization: Bearer {{merchantApiKey}}`.
+    PlatformAdminKeyAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: |
+        Bearer API key for platform admin operations. Pass as `Authorization: Bearer {{platformAdminKey}}`.
+  schemas:
+    ErrorResponse:
+      description: Standard error response envelope returned for 4xx/5xx responses.
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code.
+            message:
+              type: string
+              description: Human-readable error description.
+    PaginationMeta:
+      description: Pagination metadata included in list responses.
+      type: object
+      required:
+        - page
+        - pageSize
+        - total
+        - hasMore
+      properties:
+        page:
+          type: integer
+          description: Current page number (1-indexed).
+        pageSize:
+          type: integer
+          description: Number of results per page.
+        total:
+          type: integer
+          description: Total number of matching records.
+        hasMore:
+          type: boolean
+          description: Whether additional pages exist.
+    CreditNote:
+      description: A credit note issued against an invoice.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        invoice_id:
+          type: string
+        number:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - issued
+            - void
+        reason:
+          type: string
+          nullable: true
+        amount:
+          type: integer
+        currency:
+          type: string
+        voided_at:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CreditNoteLineItem:
+      description: A line item on a credit note.
+      type: object
+      properties:
+        id:
+          type: string
+        credit_note_id:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: integer
+        unit_amount:
+          type: integer
+        amount:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    Event:
+      description: A domain event representing a state change in the system.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        type:
+          type: string
+          description: Event type (e.g. payment_intent.succeeded).
+        entity_type:
+          type: string
+          description: Type of entity that triggered the event.
+        entity_id:
+          type: string
+          description: ID of the entity that triggered the event.
+        payload:
+          type: object
+          description: Event payload with entity snapshot.
+        actor_type:
+          type: string
+          nullable: true
+        actor_id:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    WebhookEndpoint:
+      description: A registered webhook endpoint for receiving event notifications.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        url:
+          type: string
+          format: uri
+        is_active:
+          type: boolean
+        enabled_events:
+          type: array
+          items:
+            type: string
+        secret:
+          type: string
+          description: Only included on creation and rotate.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    WebhookDelivery:
+      description: A webhook delivery record with attempt history.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        webhook_endpoint_id:
+          type: string
+        event_type:
+          type: string
+        payload:
+          type: object
+        status:
+          type: string
+          enum:
+            - PENDING
+            - DELIVERED
+            - FAILED
+        delivered_at:
+          type: string
+          format: date-time
+          nullable: true
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        attempts:
+          type: array
+          items:
+            type: object
+            properties:
+              attempt_number:
+                type: integer
+              response_status:
+                type: integer
+                nullable: true
+              created_at:
+                type: string
+                format: date-time
+              completed_at:
+                type: string
+                format: date-time
+                nullable: true
+    Adjustment:
+      description: A credit or debit adjustment.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        type:
+          type: string
+          enum:
+            - credit
+            - debit
+        amount:
+          type: integer
+        currency:
+          type: string
+        description:
+          type: string
+          nullable: true
+        reference:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Dispute:
+      description: A payment dispute.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        payment_intent_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - needs_response
+            - under_review
+            - won
+            - lost
+            - accepted
+            - expired
+        reason:
+          type: string
+          enum:
+            - fraudulent
+            - duplicate
+            - not_received
+            - product_unacceptable
+            - subscription_canceled
+            - other
+        amount:
+          type: integer
+        currency:
+          type: string
+        due_by:
+          type: string
+          format: date-time
+          nullable: true
+        closed_at:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DisputeEvidence:
+      description: A piece of evidence for a dispute.
+      type: object
+      properties:
+        id:
+          type: string
+        dispute_id:
+          type: string
+        type:
+          type: string
+          enum:
+            - receipt
+            - shipping_proof
+            - customer_communication
+            - service_documentation
+            - policy_disclosure
+            - other
+        file_name:
+          type: string
+          nullable: true
+        file_size:
+          type: integer
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Representment:
+      description: A dispute representment.
+      type: object
+      properties:
+        id:
+          type: string
+        dispute_id:
+          type: string
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        outcome:
+          type: string
+          nullable: true
+        details:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    OnboardingProfile:
+      description: Merchant onboarding / KYB profile.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        business_name:
+          type: string
+          nullable: true
+        business_type:
+          type: string
+          nullable: true
+        tax_id:
+          type: string
+          nullable: true
+        website:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - started
+            - submitted
+            - under_review
+            - approved
+            - denied
+            - withdrawn
+        submitted_at:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Owner:
+      description: Beneficial owner attached to an onboarding profile.
+      type: object
+      properties:
+        id:
+          type: string
+        onboarding_profile_id:
+          type: string
+        first_name:
+          type: string
+        last_name:
+          type: string
+        email:
+          type: string
+          nullable: true
+        ownership_percentage:
+          type: integer
+          nullable: true
+        title:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    OnboardingDocument:
+      description: Document record for KYB verification.
+      type: object
+      properties:
+        id:
+          type: string
+        onboarding_profile_id:
+          type: string
+        type:
+          type: string
+          enum:
+            - government_id
+            - proof_of_address
+            - bank_statement
+            - tax_return
+            - articles_of_incorporation
+            - other
+        status:
+          type: string
+          enum:
+            - pending
+            - verified
+            - rejected
+        file_name:
+          type: string
+        file_size:
+          type: integer
+          nullable: true
+        mime_type:
+          type: string
+          nullable: true
+        review_note:
+          type: string
+          nullable: true
+        reviewed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    OnboardingBankAccount:
+      description: Bank account attached to an onboarding profile.
+      type: object
+      properties:
+        id:
+          type: string
+        onboarding_profile_id:
+          type: string
+        bank_name:
+          type: string
+        account_holder_name:
+          type: string
+        routing_number:
+          type: string
+        account_number_last4:
+          type: string
+        account_type:
+          type: string
+          enum:
+            - checking
+            - savings
+        is_verified:
+          type: boolean
+        is_primary:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UnderwritingCase:
+      description: Underwriting review case linked to an onboarding profile.
+      type: object
+      properties:
+        id:
+          type: string
+        onboarding_profile_id:
+          type: string
+        assigned_to:
+          type: string
+          nullable: true
+        risk_score:
+          type: integer
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    UnderwritingDecision:
+      description: Decision recorded against an underwriting case.
+      type: object
+      properties:
+        id:
+          type: string
+        underwriting_case_id:
+          type: string
+        result:
+          type: string
+          enum:
+            - approved
+            - denied
+            - escalated
+            - pending_info
+        reason:
+          type: string
+          nullable: true
+        decided_by:
+          type: string
+          nullable: true
+        decided_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Subscription:
+      description: A recurring billing subscription.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        customer_id:
+          type: string
+        status:
+          type: string
+          enum:
+            - incomplete
+            - incomplete_expired
+            - trialing
+            - active
+            - past_due
+            - paused
+            - canceled
+            - unpaid
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        cancel_at_period_end:
+          type: boolean
+        canceled_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        trial_start:
+          type: string
+          format: date-time
+          nullable: true
+        trial_end:
+          type: string
+          format: date-time
+          nullable: true
+        default_payment_method:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriptionItem"
+    SubscriptionItem:
+      description: A line item on a subscription linking a price.
+      type: object
+      properties:
+        id:
+          type: string
+        subscription_id:
+          type: string
+        price_id:
+          type: string
+        quantity:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Invoice:
+      description: An invoice representing an amount owed by a customer.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        customer_id:
+          type: string
+        subscription_id:
+          type: string
+          nullable: true
+        number:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum:
+            - draft
+            - open
+            - paid
+            - void
+            - uncollectible
+            - past_due
+        currency:
+          type: string
+        subtotal:
+          type: integer
+        tax:
+          type: integer
+        total:
+          type: integer
+        amount_paid:
+          type: integer
+        amount_due:
+          type: integer
+        due_date:
+          type: string
+          format: date-time
+          nullable: true
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        voided_at:
+          type: string
+          format: date-time
+          nullable: true
+        period_start:
+          type: string
+          format: date-time
+          nullable: true
+        period_end:
+          type: string
+          format: date-time
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceItem"
+    InvoiceItem:
+      description: A line item on an invoice.
+      type: object
+      properties:
+        id:
+          type: string
+        invoice_id:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: integer
+        unit_amount:
+          type: integer
+        amount:
+          type: integer
+        currency:
+          type: string
+        price_id:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    InvoiceAttempt:
+      description: A payment attempt against an invoice.
+      type: object
+      properties:
+        id:
+          type: string
+        invoice_id:
+          type: string
+        attempt_number:
+          type: integer
+        amount:
+          type: integer
+        status:
+          type: string
+          enum:
+            - succeeded
+            - failed
+        error_message:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    Report:
+      description: An on-demand report generated for a merchant.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - completed
+            - failed
+        parameters:
+          type: object
+          nullable: true
+        result_url:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Export:
+      description: A data export requested by a merchant.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        type:
+          type: string
+        format:
+          type: string
+          enum:
+            - csv
+            - json
+            - pdf
+        status:
+          type: string
+          enum:
+            - queued
+            - processing
+            - completed
+            - failed
+        parameters:
+          type: object
+          nullable: true
+        result_url:
+          type: string
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        row_count:
+          type: integer
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ExportSchedule:
+      description: A recurring export schedule configured by a merchant.
+      type: object
+      properties:
+        id:
+          type: string
+        merchant_id:
+          type: string
+        type:
+          type: string
+        format:
+          type: string
+          enum:
+            - csv
+            - json
+            - pdf
+        frequency:
+          type: string
+          enum:
+            - daily
+            - weekly
+            - monthly
+        parameters:
+          type: object
+          nullable: true
+        is_active:
+          type: boolean
+        last_run_at:
+          type: string
+          format: date-time
+          nullable: true
+        next_run_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    Job:
+      description: A platform background job.
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+          enum:
+            - queued
+            - running
+            - completed
+            - failed
+            - canceled
+        payload:
+          type: object
+          nullable: true
+        result:
+          type: object
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        scheduled_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    DeadLetter:
+      description: A dead letter entry for failed processing.
+      type: object
+      properties:
+        id:
+          type: string
+        source_type:
+          type: string
+        source_id:
+          type: string
+          nullable: true
+        payload:
+          type: object
+        error_message:
+          type: string
+        status:
+          type: string
+          enum:
+            - pending
+            - reprocessed
+            - discarded
+        reprocessed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+  parameters:
+    IdempotencyKey:
+      in: header
+      name: Idempotency-Key
+      required: true
+      description: |
+        Client-generated unique key for safe request retries. Identical key + payload replays the original response.
+      schema:
+        type: string
+        example: idem-key-a1b2c3d4
+    PageParam:
+      in: query
+      name: page
+      description: Page number (1-indexed).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSizeParam:
+      in: query
+      name: pageSize
+      description: Number of results per page (max 100).
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 10
+    PathId:
+      in: path
+      name: id
+      required: true
+      description: Resource identifier.
+      schema:
+        type: string
+  headers:
+    X-Signature:
+      description: HMAC SHA-256 signature computed over `timestamp.payload`.
+      schema:
+        type: string
+    X-Timestamp:
+      description: Unix timestamp (seconds) at webhook delivery time.
+      schema:
+        type: string
+    X-Event-Type:
+      description: Webhook event type string (e.g. `payment_intent.succeeded`).
+      schema:
+        type: string
+    X-RateLimit-Limit:
+      description: Maximum requests allowed in the current fixed window.
+      schema:
+        type: string
+    X-RateLimit-Remaining:
+      description: Requests remaining in the current fixed window.
+      schema:
+        type: string
+    X-RateLimit-Reset:
+      description: Unix timestamp when the current rate-limit window resets.
+      schema:
+        type: string
