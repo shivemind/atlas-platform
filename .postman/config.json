@@ -1,0 +1,22 @@
+{
+  "workspace": {
+    "id": "95332ec2-c81c-4224-86ea-53127f34d15f"
+  },
+  "entities": {
+    "collections": [
+      "../postman/collections/Atlas Platform API.postman_collection.json",
+      "../postman/collections/atlas-production/atlas-platform.postman_collection.json",
+      "../postman/collections/atlas-production/atlas-platform.postman_collection.json",
+      "../postman/collections/atlas-production/atlas-platform.postman_collection.json",
+      "../postman/collections/atlas-production/atlas-platform.postman_collection.json",
+      "../postman/collections/atlas-production/atlas-platform.postman_collection.json"
+    ],
+    "environments": [
+      "../postman/environments/Atlas Platform API - Dev.postman_environment.json",
+      "../postman/environments/Atlas Platform API - Production.postman_environment.json"
+    ],
+    "specs": [],
+    "flows": [],
+    "globals": []
+  }
+}
