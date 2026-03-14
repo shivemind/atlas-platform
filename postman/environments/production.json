@@ -1,0 +1,32 @@
+﻿{
+    "id":  "bbbb93e9-1d36-4db5-81f4-3da39a9f77d9",
+    "name":  "Atlas Platform API - Production",
+    "owner":  "52400725",
+    "createdAt":  "2026-03-11T21:32:10.000Z",
+    "updatedAt":  "2026-03-14T03:05:33.000Z",
+    "values":  [
+                   {
+                       "key":  "baseUrl",
+                       "value":  "https://atlas-platform-two.vercel.app",
+                       "enabled":  true
+                   },
+                   {
+                       "key":  "apiVersion",
+                       "value":  "0.2.0",
+                       "enabled":  true
+                   },
+                   {
+                       "key":  "apiKey",
+                       "value":  "test-api-key",
+                       "enabled":  true,
+                       "type":  "secret"
+                   },
+                   {
+                       "key":  "githubRepo",
+                       "value":  "https://github.com/shivemind/atlas-platform",
+                       "enabled":  true
+                   }
+               ],
+    "uid":  "52400725-bbbb93e9-1d36-4db5-81f4-3da39a9f77d9",
+    "isPublic":  false
+}
