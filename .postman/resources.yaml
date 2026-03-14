@@ -2,6 +2,6 @@ workspace:
   id: 5166232b-8acf-4112-b0ae-c568fa8abc24
 cloudResources:
   collections:
-    ../postman/collections/atlas-platform-api.json: fc401568-1bf1-4a35-a2da-856f0c0ae102
+    ../postman/collections/atlas-platform-api.json: ce6cc715-f66a-4f4b-8ecd-31877fdef6e2
   environments:
     ../postman/environments/production.json: e3b1754b-43ce-4b84-8162-32b3a3243dd8
